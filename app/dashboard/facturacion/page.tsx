@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { supabaseBrowser } from '@/lib/supabaseClient';
 import { fmtDate, fmtMoney } from '@/lib/utils';
 import { Modal, useToast, FileField, FileThumb, ScanModal } from '@/components/ui';
@@ -120,6 +121,38 @@ export default function FacturacionPage() {
     load();
   }
 
+  function exportExcel() {
+    if (invoices.length === 0) { showToast('No hay facturas para exportar', 'error'); return; }
+    const alicuotaPct = Number(settings?.alicuota_iva) || 21;
+    const esRI = settings?.condicion_fiscal === 'RI';
+
+    const detalle = [...invoices]
+      .sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''))
+      .map(inv => ({
+        Fecha: fmtDate(inv.fecha),
+        Descripción: inv.descripcion || '',
+        Monto: Number(inv.monto) || 0,
+        'IVA estimado': esRI ? Math.round((Number(inv.monto) || 0) * (alicuotaPct / 100) * 100) / 100 : '',
+        'Tiene comprobante': inv.file_path ? 'Sí' : 'No',
+      }));
+    const wsDetalle = XLSX.utils.json_to_sheet(detalle);
+    wsDetalle['!cols'] = [{ wch: 12 }, { wch: 40 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
+
+    const resumen = months.map(m => ({
+      Mes: m,
+      Facturado: byMonth[m],
+      'IVA estimado': esRI ? Math.round(byMonth[m] * (alicuotaPct / 100) * 100) / 100 : '',
+    }));
+    resumen.push({ Mes: 'TOTAL', Facturado: totalFacturado, 'IVA estimado': esRI ? Math.round(ivaTotal * 100) / 100 : '' } as any);
+    const wsResumen = XLSX.utils.json_to_sheet(resumen);
+    wsResumen['!cols'] = [{ wch: 12 }, { wch: 14 }, { wch: 14 }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsDetalle, 'Facturas');
+    XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen mensual');
+    XLSX.writeFile(wb, `facturacion_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
   if (loading || !settings) return <div className="empty"><div className="spinner" style={{ margin: '0 auto 10px' }} />Cargando...</div>;
 
   return (
@@ -128,6 +161,7 @@ export default function FacturacionPage() {
         <div><h1>Facturación</h1><div className="sub">Facturas, IVA estimado y datos fiscales</div></div>
         <div className="topbar-actions">
           <button className="btn btn-secondary" onClick={() => setScanOpen(true)}>Escanear factura</button>
+          <button className="btn btn-secondary" onClick={exportExcel}>Descargar Excel</button>
           <button className="btn btn-primary" onClick={() => setFormOpen(true)}>+ Cargar factura</button>
         </div>
       </div>
