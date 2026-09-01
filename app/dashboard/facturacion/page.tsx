@@ -4,10 +4,11 @@ import * as XLSX from 'xlsx';
 import { supabaseBrowser } from '@/lib/supabaseClient';
 import { fmtDate, fmtMoney } from '@/lib/utils';
 import { Modal, useToast, FileField, FileThumb, ScanModal } from '@/components/ui';
-import { Invoice, Settings } from '@/lib/types';
+import { Invoice, Settings, Cliente } from '@/lib/types';
 
 export default function FacturacionPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [clientes, setClientes] = useState<Cliente[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
@@ -21,11 +22,13 @@ export default function FacturacionPage() {
   async function load() {
     const supabase = supabaseBrowser();
     const { data: { user } } = await supabase.auth.getUser();
-    const [inv, s] = await Promise.all([
+    const [inv, s, cli] = await Promise.all([
       supabase.from('invoices').select('*').order('fecha', { ascending: false }),
       supabase.from('settings').select('*').eq('owner', user!.id).maybeSingle(),
+      supabase.from('clientes').select('*').order('razon_social', { ascending: true }),
     ]);
     setInvoices(inv.data || []);
+    setClientes(cli.data || []);
     const settingsData = s.data || { owner: user!.id, precio_combustible: null, condicion_fiscal: 'RI', alicuota_iva: 21, afip_alta_path: null, afip_alta_name: null, iibb_path: null, iibb_name: null };
     setSettings(settingsData as Settings);
     setAfipFile(settingsData.afip_alta_path ? { path: settingsData.afip_alta_path, name: settingsData.afip_alta_name || '' } : null);
@@ -94,6 +97,7 @@ export default function FacturacionPage() {
     const { error } = await supabase.from('invoices').insert({
       owner: user!.id, fecha: fd.get('fecha'), monto,
       descripcion: String(fd.get('desc') || '').trim(),
+      cliente_id: fd.get('cliente_id') || null,
       file_path: invFile?.path || null, file_name: invFile?.name || null,
     });
     if (error) { showToast('No se pudo guardar. Probá de nuevo.', 'error'); return; }
@@ -131,12 +135,13 @@ export default function FacturacionPage() {
       .map(inv => ({
         Fecha: fmtDate(inv.fecha),
         Descripción: inv.descripcion || '',
+        Cliente: clientes.find(c => c.id === inv.cliente_id)?.razon_social || '',
         Monto: Number(inv.monto) || 0,
         'IVA estimado': esRI ? Math.round((Number(inv.monto) || 0) * (alicuotaPct / 100) * 100) / 100 : '',
         'Tiene comprobante': inv.file_path ? 'Sí' : 'No',
       }));
     const wsDetalle = XLSX.utils.json_to_sheet(detalle);
-    wsDetalle['!cols'] = [{ wch: 12 }, { wch: 40 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
+    wsDetalle['!cols'] = [{ wch: 12 }, { wch: 40 }, { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
 
     const resumen = months.map(m => ({
       Mes: m,
@@ -209,11 +214,12 @@ export default function FacturacionPage() {
       <div className="card table-wrap">
         {invoices.length === 0 ? <div className="empty"><h3>Sin facturas</h3><p>Cargá una factura para empezar a promediar tu facturación e IVA.</p></div> : (
           <table>
-            <thead><tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Comprobante</th><th></th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Descripción</th><th>Cliente</th><th>Monto</th><th>Comprobante</th><th></th></tr></thead>
             <tbody>
               {invoices.map(inv => (
                 <tr key={inv.id}>
                   <td>{fmtDate(inv.fecha)}</td><td>{inv.descripcion || '—'}</td>
+                  <td>{clientes.find(c => c.id === inv.cliente_id)?.razon_social || '—'}</td>
                   <td style={{ fontWeight: 600 }}>{fmtMoney(inv.monto)}</td>
                   <td><FileThumb path={inv.file_path} name={inv.file_name} /></td>
                   <td><button className="btn btn-ghost" onClick={() => deleteInvoice(inv.id)}>Eliminar</button></td>
@@ -233,6 +239,12 @@ export default function FacturacionPage() {
               <div className="field"><label>Monto</label><input name="monto" type="number" step="0.01" defaultValue={prefill?.monto || ''} /></div>
             </div>
             <div className="field"><label>Descripción (opcional)</label><input name="desc" placeholder="Ej: Factura A N° 0001-00001234" defaultValue={prefill?.descripcion || ''} /></div>
+            <div className="field"><label>Cliente (opcional)</label>
+              <select name="cliente_id" defaultValue="">
+                <option value="">Sin asignar</option>
+                {clientes.map(c => <option key={c.id} value={c.id}>{c.razon_social}</option>)}
+              </select>
+            </div>
             <FileField label="Foto o PDF de la factura" folder="facturas" currentPath={invFile?.path} currentName={invFile?.name} onUploaded={setInvFile} />
           </div>
           <div className="modal-foot">

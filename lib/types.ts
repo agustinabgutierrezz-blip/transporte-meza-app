@@ -10,7 +10,8 @@ export type Cubierta = { id: string; vehicle_id: string; fecha: string | null; k
 export type Mantenimiento = { id: string; vehicle_id: string; fecha: string | null; km: number | null; tipo: string | null; costo: number | null; taller: string | null; notas: string | null };
 export type Trip = { id: string; fecha: string | null; vehicle_id: string | null; driver_id: string | null; origen: string | null; destino: string | null; km: number | null; notas: string | null };
 export type Fuel = { id: string; fecha: string | null; vehicle_id: string | null; estacion: string | null; litros: number | null; precio_litro: number | null; total: number | null };
-export type Invoice = { id: string; fecha: string | null; monto: number | null; descripcion: string | null; file_path: string | null; file_name: string | null };
+export type Invoice = { id: string; fecha: string | null; monto: number | null; descripcion: string | null; file_path: string | null; file_name: string | null; cliente_id: string | null };
+export type Cliente = { id: string; razon_social: string; cuit: string | null };
 export type Settings = {
   owner: string; precio_combustible: number | null; condicion_fiscal: string;
   alicuota_iva: number; afip_alta_path: string | null; afip_alta_name: string | null;
@@ -28,4 +29,5 @@ export const DRIVER_DOC_FIELDS: [string, string][] = [
 export const VEHICLE_DOC_FIELDS: [string, string, boolean][] = [
   ['seguro', 'Seguro del vehículo', true],
   ['titulo', 'Título del vehículo', false],
+  ['vtv', 'VTV (Verificación Técnica)', true],
 ];

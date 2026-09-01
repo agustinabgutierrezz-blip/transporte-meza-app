@@ -4,6 +4,17 @@ import { ToastProvider } from '@/components/ui';
 export const metadata = {
   title: 'Transporte Meza · Control de Flota',
   description: 'Gestión de flota, choferes, viajes, combustible y facturación',
+  manifest: '/manifest.json',
+  themeColor: '#22384A',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'T. Meza',
+  },
+  icons: {
+    icon: '/icon-192.png',
+    apple: '/icon-192.png',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -18,6 +29,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <ToastProvider>{children}</ToastProvider>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function () {
+                  navigator.serviceWorker.register('/sw.js').catch(function(){});
+                });
+              }
+            `,
+          }}
+        />
       </body>
     </html>
   );

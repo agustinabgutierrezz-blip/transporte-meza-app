@@ -190,3 +190,23 @@ for update using (bucket_id = 'docs' and (storage.foldername(name))[1] = auth.ui
 
 create policy "owner_delete_docs" on storage.objects
 for delete using (bucket_id = 'docs' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- =========================================================
+-- MIGRACIÓN 2: Clientes + vínculo con facturas
+-- Podés correr este bloque solo (o el archivo entero de nuevo,
+-- es seguro, no borra ni duplica nada existente).
+-- =========================================================
+create table if not exists clientes (
+  id uuid primary key default gen_random_uuid(),
+  owner uuid not null default auth.uid(),
+  razon_social text not null,
+  cuit text,
+  created_at timestamptz default now()
+);
+alter table clientes enable row level security;
+drop policy if exists "owner_all_clientes" on clientes;
+create policy "owner_all_clientes" on clientes
+for all using (owner = auth.uid()) with check (owner = auth.uid());
+
+alter table invoices add column if not exists cliente_id uuid references clientes(id) on delete set null;
+

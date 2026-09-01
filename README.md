@@ -1,5 +1,13 @@
 # Transporte Meza · Control de Flota
 
+## 📌 Si ya tenías la app instalada y estás actualizando
+
+1. **Base de datos**: andá a Supabase → SQL Editor → pegá **todo** el archivo `supabase/schema.sql` de nuevo y dale Run. Es seguro, no borra nada — solo agrega la tabla nueva de Clientes.
+2. **Código**: en GitHub, entrá a tu repositorio → botón **"Add file" → "Upload files"** → arrastrá **todos** los archivos y carpetas de esta carpeta (los de adentro, no la carpeta zip). GitHub te va a preguntar si querés reemplazar los archivos que ya existen — decile que sí. Al final, "Commit changes".
+3. Vercel va a detectar el cambio solo y publicar la versión nueva en 1-2 minutos. No hace falta tocar nada ahí.
+
+---
+
 App propia (no depende del chat de Claude) para gestionar vehículos, choferes, viajes, combustible y facturación. Login con usuario y contraseña. Todo gratis: **Supabase** (base de datos + login + archivos) y **Vercel** (hosting).
 
 No hace falta saber programar para desplegarla: seguí los pasos en orden. Vas a tardar unos 20-30 minutos la primera vez.
