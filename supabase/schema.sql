@@ -210,3 +210,25 @@ for all using (owner = auth.uid()) with check (owner = auth.uid());
 
 alter table invoices add column if not exists cliente_id uuid references clientes(id) on delete set null;
 
+-- =========================================================
+-- MIGRACIÓN 3: Tarifas por tipo de unidad y rango de km
+-- Podés correr solo este bloque en el SQL Editor.
+-- =========================================================
+alter table vehicles add column if not exists tipo_unidad text;
+alter table trips add column if not exists costo_estimado numeric;
+
+create table if not exists tarifas (
+  id uuid primary key default gen_random_uuid(),
+  owner uuid not null default auth.uid(),
+  tipo_unidad text not null,
+  km_desde numeric not null default 0,
+  km_hasta numeric, -- vacío = sin límite superior
+  precio numeric not null,
+  created_at timestamptz default now()
+);
+alter table tarifas enable row level security;
+drop policy if exists "owner_all_tarifas" on tarifas;
+create policy "owner_all_tarifas" on tarifas
+for all using (owner = auth.uid()) with check (owner = auth.uid());
+
+

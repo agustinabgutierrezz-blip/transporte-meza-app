@@ -2,14 +2,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabaseBrowser } from '@/lib/supabaseClient';
-import { fmtDate, fmtKm, uid } from '@/lib/utils';
+import { fmtDate, fmtKm, fmtMoney, uid } from '@/lib/utils';
 import { Modal, ScanModal, useToast } from '@/components/ui';
-import { Driver, Trip, Vehicle } from '@/lib/types';
+import { Driver, Tarifa, Trip, Vehicle, findTarifa } from '@/lib/types';
 
 export default function ViajesPage() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [tarifas, setTarifas] = useState<Tarifa[]>([]);
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
@@ -19,14 +20,20 @@ export default function ViajesPage() {
   const [filterMonth, setFilterMonth] = useState('');
   const showToast = useToast();
 
+  // Estado del formulario (para calcular la sugerencia de tarifa en vivo)
+  const [fVehiculoId, setFVehiculoId] = useState('');
+  const [fKm, setFKm] = useState<string>('');
+  const [fCosto, setFCosto] = useState<string>('');
+
   async function load() {
     const supabase = supabaseBrowser();
-    const [t, v, d] = await Promise.all([
+    const [t, v, d, tf] = await Promise.all([
       supabase.from('trips').select('*').order('fecha', { ascending: false }),
       supabase.from('vehicles').select('*'),
       supabase.from('drivers').select('*'),
+      supabase.from('tarifas').select('*'),
     ]);
-    setTrips(t.data || []); setVehicles(v.data || []); setDrivers(d.data || []);
+    setTrips(t.data || []); setVehicles(v.data || []); setDrivers(d.data || []); setTarifas(tf.data || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -34,6 +41,18 @@ export default function ViajesPage() {
   const filtered = useMemo(() => trips
     .filter(t => !filterVehicle || t.vehicle_id === filterVehicle)
     .filter(t => !filterMonth || t.fecha?.slice(0, 7) === filterMonth), [trips, filterVehicle, filterMonth]);
+
+  const vehiculoSel = vehicles.find(v => v.id === fVehiculoId);
+  const sugerencia = findTarifa(tarifas, vehiculoSel?.tipo_unidad, fKm ? Number(fKm) : null);
+
+  function openForm(t: Trip | null, pf: Partial<Trip> | null) {
+    setEditing(t); setPrefill(pf);
+    const form = t || pf;
+    setFVehiculoId(form?.vehicle_id || '');
+    setFKm(form?.km !== undefined && form?.km !== null ? String(form.km) : '');
+    setFCosto(form?.costo_estimado !== undefined && form?.costo_estimado !== null ? String(form.costo_estimado) : '');
+    setFormOpen(true);
+  }
 
   async function saveTrip(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -47,6 +66,7 @@ export default function ViajesPage() {
       destino: String(fd.get('destino') || '').trim(),
       km: Number(fd.get('km')) || null,
       notas: String(fd.get('notas') || '').trim(),
+      costo_estimado: fCosto ? Number(fCosto) : null,
     };
     let error;
     if (editing) {
@@ -74,7 +94,7 @@ export default function ViajesPage() {
     const rows = [...trips].sort((a, b) => (a.fecha || '').localeCompare(b.fecha || '')).map(t => {
       const v = vehicles.find(v => v.id === t.vehicle_id);
       const dr = drivers.find(d => d.id === t.driver_id);
-      return { Fecha: fmtDate(t.fecha), Patente: v?.patente || '', Vehiculo: v ? `${v.marca} ${v.modelo}` : '', Chofer: dr?.nombre || '', Origen: t.origen || '', Destino: t.destino || '', Km: t.km || '', Observaciones: t.notas || '' };
+      return { Fecha: fmtDate(t.fecha), Patente: v?.patente || '', Vehiculo: v ? `${v.marca} ${v.modelo}` : '', Chofer: dr?.nombre || '', Origen: t.origen || '', Destino: t.destino || '', Km: t.km || '', 'Costo estimado': t.costo_estimado || '', Observaciones: t.notas || '' };
     });
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
@@ -86,7 +106,8 @@ export default function ViajesPage() {
     const vehiculoId = extracted.patente ? vehicles.find(v => v.patente.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === String(extracted.patente).replace(/[^A-Za-z0-9]/g, '').toUpperCase())?.id : null;
     const nombreNorm = extracted.chofer?.trim().toLowerCase();
     const choferId = nombreNorm ? drivers.find(d => d.nombre.trim().toLowerCase().includes(nombreNorm) || nombreNorm.includes(d.nombre.trim().toLowerCase()))?.id : null;
-    setPrefill({
+    setScanOpen(false);
+    openForm(null, {
       fecha: extracted.fecha || new Date().toISOString().slice(0, 10),
       vehicle_id: vehiculoId || null,
       driver_id: choferId || null,
@@ -95,9 +116,6 @@ export default function ViajesPage() {
       km: extracted.km || null,
       notas: extracted.observaciones || '',
     });
-    setScanOpen(false);
-    setEditing(null);
-    setFormOpen(true);
     showToast('Datos leídos. Revisalos antes de guardar.', 'success');
   }
 
@@ -109,7 +127,7 @@ export default function ViajesPage() {
         <div><h1>Viajes</h1><div className="sub">{trips.length} viaje{trips.length === 1 ? '' : 's'} registrado{trips.length === 1 ? '' : 's'}</div></div>
         <div className="topbar-actions">
           <button className="btn btn-secondary" onClick={() => setScanOpen(true)}>Escanear hoja de ruta</button>
-          <button className="btn btn-primary" onClick={() => { setEditing(null); setPrefill(null); setFormOpen(true); }}>+ Cargar viaje</button>
+          <button className="btn btn-primary" onClick={() => openForm(null, null)}>+ Cargar viaje</button>
         </div>
       </div>
 
@@ -129,7 +147,7 @@ export default function ViajesPage() {
           <div className="empty"><h3>Sin viajes para mostrar</h3><p>Cargá un viaje manualmente o escaneá una hoja de ruta.</p></div>
         ) : (
           <table>
-            <thead><tr><th>Fecha</th><th>Vehículo</th><th>Chofer</th><th>Recorrido</th><th>Km</th><th></th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Vehículo</th><th>Chofer</th><th>Recorrido</th><th>Km</th><th>Costo estimado</th><th></th></tr></thead>
             <tbody>
               {filtered.map(t => {
                 const v = vehicles.find(v => v.id === t.vehicle_id);
@@ -141,8 +159,9 @@ export default function ViajesPage() {
                     <td>{dr?.nombre || '—'}</td>
                     <td>{t.origen || '—'} → {t.destino || '—'}</td>
                     <td>{fmtKm(t.km)}</td>
+                    <td>{t.costo_estimado ? fmtMoney(t.costo_estimado) : '—'}</td>
                     <td>
-                      <button className="btn btn-ghost" onClick={() => { setEditing(t); setPrefill(null); setFormOpen(true); }}>Editar</button>
+                      <button className="btn btn-ghost" onClick={() => openForm(t, null)}>Editar</button>
                       <button className="btn btn-ghost" onClick={() => deleteTrip(t.id)}>Eliminar</button>
                     </td>
                   </tr>
@@ -154,16 +173,16 @@ export default function ViajesPage() {
       </div>
 
       <Modal open={formOpen} onClose={() => { setFormOpen(false); setEditing(null); setPrefill(null); }}>
-        <form onSubmit={saveTrip} key={editing?.id || 'new'}>
+        <form onSubmit={saveTrip} key={editing?.id || (prefill ? 'prefilled' : 'new')}>
           <div className="modal-head"><h2>{editing ? 'Editar viaje' : 'Cargar viaje'}</h2><button type="button" className="modal-close" onClick={() => setFormOpen(false)}>&times;</button></div>
           <div className="modal-body">
             <div className="field-row">
               <div className="field"><label>Fecha</label><input name="fecha" type="date" defaultValue={form?.fecha || new Date().toISOString().slice(0, 10)} /></div>
-              <div className="field"><label>Kilómetros recorridos</label><input name="km" type="number" defaultValue={form?.km || ''} /></div>
+              <div className="field"><label>Kilómetros recorridos</label><input name="km" type="number" value={fKm} onChange={e => setFKm(e.target.value)} /></div>
             </div>
             <div className="field-row">
               <div className="field"><label>Vehículo</label>
-                <select name="vehiculo" defaultValue={form?.vehicle_id || ''}>
+                <select name="vehiculo" value={fVehiculoId} onChange={e => setFVehiculoId(e.target.value)}>
                   <option value="">Seleccionar vehículo</option>
                   {vehicles.map(v => <option key={v.id} value={v.id}>{v.patente} · {v.marca} {v.modelo}</option>)}
                 </select>
@@ -178,6 +197,19 @@ export default function ViajesPage() {
             <div className="field-row">
               <div className="field"><label>Origen</label><input name="origen" defaultValue={form?.origen || ''} /></div>
               <div className="field"><label>Destino</label><input name="destino" defaultValue={form?.destino || ''} /></div>
+            </div>
+            <div className="field">
+              <label>Costo estimado del viaje</label>
+              <input type="number" step="0.01" value={fCosto} onChange={e => setFCosto(e.target.value)} placeholder="0" />
+              {vehiculoSel && !vehiculoSel.tipo_unidad && (
+                <div className="field-hint">Este vehículo no tiene "tipo de unidad" cargado — asignaselo en Flota para que la app pueda sugerirte el costo.</div>
+              )}
+              {sugerencia && (
+                <div className="field-hint">
+                  Sugerido según tarifario: <strong>{fmtMoney(sugerencia.precio)}</strong>{' '}
+                  <button type="button" className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setFCosto(String(sugerencia.precio))}>Usar</button>
+                </div>
+              )}
             </div>
             <div className="field"><label>Observaciones</label><textarea name="notas" rows={2} defaultValue={form?.notas || ''} /></div>
           </div>

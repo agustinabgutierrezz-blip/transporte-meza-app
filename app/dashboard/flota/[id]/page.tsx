@@ -50,6 +50,7 @@ export default function VehicleDetailPage({ params }: { params: { id: string } }
       modelo: String(fd.get('modelo') || '').trim(),
       anio: Number(fd.get('anio')) || null,
       km: Number(fd.get('km')) || 0,
+      tipo_unidad: String(fd.get('tipo_unidad') || '').trim() || null,
     }).eq('id', id);
     if (error) { showToast('No se pudo guardar. Probá de nuevo.', 'error'); return; }
     showToast('Vehículo guardado', 'success');
@@ -87,6 +88,7 @@ export default function VehicleDetailPage({ params }: { params: { id: string } }
             <div><div className="stat-label">Kilometraje actual</div><div className="entity-name" style={{ fontSize: 20, marginTop: 4 }}>{fmtKm(v.km)}</div></div>
             <div><div className="stat-label">Marca / Modelo</div><div style={{ marginTop: 4, fontWeight: 600 }}>{v.marca || '—'} {v.modelo}</div></div>
             <div><div className="stat-label">Año</div><div style={{ marginTop: 4, fontWeight: 600 }}>{v.anio || '—'}</div></div>
+            <div><div className="stat-label">Tipo de unidad</div><div style={{ marginTop: 4, fontWeight: 600 }}>{v.tipo_unidad || '—'}</div></div>
           </div>
         </div>
       )}
@@ -190,6 +192,7 @@ export default function VehicleDetailPage({ params }: { params: { id: string } }
               <div className="field"><label>Año</label><input name="anio" type="number" defaultValue={v.anio || ''} /></div>
               <div className="field"><label>Kilometraje actual</label><input name="km" type="number" defaultValue={v.km || ''} /></div>
             </div>
+            <div className="field"><label>Tipo de unidad (para tarifas)</label><input name="tipo_unidad" defaultValue={v.tipo_unidad || ''} placeholder="Ej: Liviano 4500 kg." /></div>
           </div>
           <div className="modal-foot">
             <button type="button" className="btn btn-danger-outline" onClick={deleteVehicle}>Eliminar</button>

@@ -2,7 +2,7 @@
 
 ## 📌 Si ya tenías la app instalada y estás actualizando
 
-1. **Base de datos**: andá a Supabase → SQL Editor → pegá **todo** el archivo `supabase/schema.sql` de nuevo y dale Run. Es seguro, no borra nada — solo agrega la tabla nueva de Clientes.
+1. **Base de datos**: andá a Supabase → SQL Editor → **iniciá una consulta nueva vacía** (no pegues el archivo completo si ya lo corriste antes) y pegá solo el bloque de la migración más reciente que corresponda (lo vas a encontrar comentado como "MIGRACIÓN" en `supabase/schema.sql`, al final del archivo). Dale Run.
 2. **Código**: en GitHub, entrá a tu repositorio → botón **"Add file" → "Upload files"** → arrastrá **todos** los archivos y carpetas de esta carpeta (los de adentro, no la carpeta zip). GitHub te va a preguntar si querés reemplazar los archivos que ya existen — decile que sí. Al final, "Commit changes".
 3. Vercel va a detectar el cambio solo y publicar la versión nueva en 1-2 minutos. No hace falta tocar nada ahí.
 

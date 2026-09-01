@@ -34,6 +34,7 @@ export default function FlotaPage() {
       modelo: String(fd.get('modelo') || '').trim(),
       anio: Number(fd.get('anio')) || null,
       km: Number(fd.get('km')) || 0,
+      tipo_unidad: String(fd.get('tipo_unidad') || '').trim() || null,
     });
     if (error) { showToast('No se pudo guardar. Probá de nuevo.', 'error'); return; }
     showToast('Vehículo guardado', 'success');
@@ -84,6 +85,7 @@ export default function FlotaPage() {
               <div className="field"><label>Año</label><input name="anio" type="number" placeholder="2019" /></div>
               <div className="field"><label>Kilometraje actual</label><input name="km" type="number" placeholder="152000" /></div>
             </div>
+            <div className="field"><label>Tipo de unidad (para tarifas)</label><input name="tipo_unidad" placeholder="Ej: Liviano 4500 kg." /></div>
           </div>
           <div className="modal-foot">
             <button type="button" className="btn btn-secondary" onClick={() => setOpen(false)}>Cancelar</button>

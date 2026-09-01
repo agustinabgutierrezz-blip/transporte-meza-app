@@ -11,6 +11,7 @@ const NAV = [
   { href: '/dashboard/combustible', label: 'Combustible', match: (p: string) => p.startsWith('/dashboard/combustible') },
   { href: '/dashboard/facturacion', label: 'Facturación', match: (p: string) => p.startsWith('/dashboard/facturacion') },
   { href: '/dashboard/clientes', label: 'Clientes', match: (p: string) => p.startsWith('/dashboard/clientes') },
+  { href: '/dashboard/tarifas', label: 'Tarifas', match: (p: string) => p.startsWith('/dashboard/tarifas') },
   { href: '/dashboard/reportes', label: 'Reportes', match: (p: string) => p.startsWith('/dashboard/reportes') },
 ];
 
