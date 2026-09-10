@@ -27,7 +27,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
+    <>
       <div id="sidebar">
         <div className="brand">
           <div className="brand-mark"><img src="/logo.png" alt="Transporte Meza" /></div>
@@ -51,6 +51,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div id="app">
         <div id="content" style={{ paddingTop: 28 }}>{children}</div>
       </div>
-    </div>
+    </>
   );
 }
