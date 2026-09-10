@@ -1,4 +1,4 @@
- :root{
+:root{
     --bg:#EEF0EB;
     --surface:#FFFFFF;
     --ink:#1A1D1E;
@@ -280,8 +280,8 @@
     .brand{border-bottom:none;border-right:1px solid rgba(255,255,255,0.12);padding:10px 12px;flex-shrink:0;}
     .brand-sub{display:none;}
     .brand-title{font-size:16px;}
-    nav{flex-direction:row;padding:6px;overflow-x:auto;flex:1;gap:2px;}
-    .nav-item{border-left:none;border-bottom:3px solid transparent;padding:8px 10px;white-space:nowrap;font-size:13px;flex-shrink:0;}
+    nav{flex-direction:row;padding:6px;overflow-x:auto;flex:1;gap:2px;min-width:0;}
+    .nav-item{width:auto;flex:0 0 auto;border-left:none;border-bottom:3px solid transparent;padding:8px 10px;white-space:nowrap;font-size:13px;flex-shrink:0;}
     .nav-item.active{border-bottom-color:var(--route);}
     .sidebar-foot{display:none;}
     #topbar,#content{padding-left:16px;padding-right:16px;}
