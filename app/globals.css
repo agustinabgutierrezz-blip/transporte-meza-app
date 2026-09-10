@@ -1,5 +1,4 @@
-
-  :root{
+ :root{
     --bg:#EEF0EB;
     --surface:#FFFFFF;
     --ink:#1A1D1E;
@@ -278,11 +277,11 @@
   @media(max-width:760px){
     body{flex-direction:column;}
     #sidebar{width:100%;height:auto;position:sticky;top:0;flex-direction:row;align-items:center;z-index:50;}
-    .brand{border-bottom:none;border-right:1px solid rgba(255,255,255,0.12);padding:12px 14px;}
+    .brand{border-bottom:none;border-right:1px solid rgba(255,255,255,0.12);padding:10px 12px;flex-shrink:0;}
     .brand-sub{display:none;}
-    nav{flex-direction:row;padding:8px;overflow-x:auto;flex:1;}
-    .nav-item span{display:none;}
-    .nav-item{border-left:none;border-bottom:3px solid transparent;padding:9px;}
+    .brand-title{font-size:16px;}
+    nav{flex-direction:row;padding:6px;overflow-x:auto;flex:1;gap:2px;}
+    .nav-item{border-left:none;border-bottom:3px solid transparent;padding:8px 10px;white-space:nowrap;font-size:13px;flex-shrink:0;}
     .nav-item.active{border-bottom-color:var(--route);}
     .sidebar-foot{display:none;}
     #topbar,#content{padding-left:16px;padding-right:16px;}
@@ -297,4 +296,3 @@
   .login-sub{text-align:center;color:var(--ink-soft);font-size:12.5px;margin-bottom:22px;}
   .login-error{background:var(--danger-soft);color:var(--danger);padding:9px 12px;border-radius:var(--radius);font-size:13px;margin-bottom:14px;}
   .login-box .btn-primary{width:100%;justify-content:center;margin-top:6px;}
-
