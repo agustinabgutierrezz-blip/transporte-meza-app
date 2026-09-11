@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import { supabaseBrowser } from '@/lib/supabaseClient';
 import { fmtDate, fmtKm, fmtMoney, uid } from '@/lib/utils';
 import { Modal, ScanModal, useToast } from '@/components/ui';
-import { Driver, Tarifa, Trip, Vehicle, findTarifa } from '@/lib/types';
+import { Driver, Tarifa, Trip, Vehicle, findTarifa, findTarifaByZona } from '@/lib/types';
 
 function normPatente(s: string) { return s.replace(/[^A-Za-z0-9]/g, '').toUpperCase(); }
 function nameTokens(s: string) {
@@ -38,6 +38,11 @@ function toNumber(v: any): number | null {
   const n = Number(String(v).replace(/\./g, '').replace(',', '.'));
   return isNaN(n) ? null : n;
 }
+function extractZona(desc: any): string | null {
+  if (!desc) return null;
+  const m = String(desc).match(/zona\s*\d+/i);
+  return m ? m[0].replace(/\s+/, ' ').replace(/^./, c => c.toUpperCase()) : null;
+}
 
 export default function ViajesPage() {
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -58,7 +63,10 @@ export default function ViajesPage() {
   // Estado del formulario (para calcular la sugerencia de tarifa en vivo)
   const [fVehiculoId, setFVehiculoId] = useState('');
   const [fKm, setFKm] = useState<string>('');
+  const [fZona, setFZona] = useState<string>('');
   const [fCosto, setFCosto] = useState<string>('');
+  const [fTienePeon, setFTienePeon] = useState(false);
+  const [fCostoPeon, setFCostoPeon] = useState<string>('');
 
   async function load() {
     const supabase = supabaseBrowser();
@@ -77,15 +85,27 @@ export default function ViajesPage() {
     .filter(t => !filterVehicle || t.vehicle_id === filterVehicle)
     .filter(t => !filterMonth || t.fecha?.slice(0, 7) === filterMonth), [trips, filterVehicle, filterMonth]);
 
+  const resumenMes = useMemo(() => {
+    if (!filterMonth) return null;
+    const total = filtered.reduce((s, t) => s + (Number(t.costo_estimado) || 0), 0);
+    return { cantidad: filtered.length, total };
+  }, [filtered, filterMonth]);
+
+  const zonasExistentes = useMemo(() => Array.from(new Set(tarifas.map(t => t.zona).filter(Boolean))) as string[], [tarifas]);
   const vehiculoSel = vehicles.find(v => v.id === fVehiculoId);
-  const sugerencia = findTarifa(tarifas, vehiculoSel?.tipo_unidad, fKm ? Number(fKm) : null);
+  const sugerenciaZona = findTarifaByZona(tarifas, vehiculoSel?.tipo_unidad, fZona || null);
+  const sugerenciaKm = findTarifa(tarifas, vehiculoSel?.tipo_unidad, fKm ? Number(fKm) : null);
+  const sugerencia = sugerenciaZona || sugerenciaKm;
 
   function openForm(t: Trip | null, pf: Partial<Trip> | null) {
     setEditing(t); setPrefill(pf);
     const form = t || pf;
     setFVehiculoId(form?.vehicle_id || '');
     setFKm(form?.km !== undefined && form?.km !== null ? String(form.km) : '');
+    setFZona(form?.zona || '');
     setFCosto(form?.costo_estimado !== undefined && form?.costo_estimado !== null ? String(form.costo_estimado) : '');
+    setFTienePeon(!!form?.tiene_peon);
+    setFCostoPeon(form?.costo_peon !== undefined && form?.costo_peon !== null ? String(form.costo_peon) : '');
     setFormOpen(true);
   }
 
@@ -99,9 +119,12 @@ export default function ViajesPage() {
       driver_id: fd.get('chofer') || null,
       origen: String(fd.get('origen') || '').trim(),
       destino: String(fd.get('destino') || '').trim(),
-      km: Number(fd.get('km')) || null,
+      km: fKm ? Number(fKm) : null,
+      zona: fZona || null,
       notas: String(fd.get('notas') || '').trim(),
       costo_estimado: fCosto ? Number(fCosto) : null,
+      tiene_peon: fTienePeon,
+      costo_peon: fTienePeon && fCostoPeon ? Number(fCostoPeon) : null,
     };
     let error;
     if (editing) {
@@ -124,12 +147,31 @@ export default function ViajesPage() {
     load();
   }
 
+  async function vaciarViajes() {
+    if (trips.length === 0) return;
+    const primero = confirm(`Esto va a borrar TODOS tus ${trips.length} viajes cargados. No se puede deshacer. ¿Continuar?`);
+    if (!primero) return;
+    const segundo = confirm('Confirmá de nuevo: se van a eliminar todos los viajes para que puedas reimportar desde cero.');
+    if (!segundo) return;
+    const supabase = supabaseBrowser();
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase.from('trips').delete().eq('owner', user!.id);
+    if (error) { showToast('No se pudo vaciar. Probá de nuevo.', 'error'); return; }
+    showToast('Viajes eliminados', 'success');
+    load();
+  }
+
   function exportExcel() {
     if (trips.length === 0) { showToast('No hay viajes para exportar', 'error'); return; }
     const rows = [...trips].sort((a, b) => (a.fecha || '').localeCompare(b.fecha || '')).map(t => {
       const v = vehicles.find(v => v.id === t.vehicle_id);
       const dr = drivers.find(d => d.id === t.driver_id);
-      return { Fecha: fmtDate(t.fecha), Patente: v?.patente || '', Vehiculo: v ? `${v.marca} ${v.modelo}` : '', Chofer: dr?.nombre || '', Origen: t.origen || '', Destino: t.destino || '', Km: t.km || '', 'Costo estimado': t.costo_estimado || '', Observaciones: t.notas || '' };
+      return {
+        Fecha: fmtDate(t.fecha), Patente: v?.patente || '', Vehiculo: v ? `${v.marca} ${v.modelo}` : '', Chofer: dr?.nombre || '',
+        Origen: t.origen || '', Destino: t.destino || '', Km: t.km || '', Zona: t.zona || '',
+        'Costo estimado': t.costo_estimado || '', Peon: t.tiene_peon ? 'Sí' : 'No', 'Costo peón': t.costo_peon || '',
+        Observaciones: t.notas || '',
+      };
     });
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
@@ -137,7 +179,8 @@ export default function ViajesPage() {
     XLSX.writeFile(wb, `viajes_${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
-  function handleExtracted(extracted: any) {    const vehiculoId = extracted.patente ? vehicles.find(v => v.patente.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === String(extracted.patente).replace(/[^A-Za-z0-9]/g, '').toUpperCase())?.id : null;
+  function handleExtracted(extracted: any) {
+    const vehiculoId = extracted.patente ? vehicles.find(v => v.patente.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === String(extracted.patente).replace(/[^A-Za-z0-9]/g, '').toUpperCase())?.id : null;
     const nombreNorm = extracted.chofer?.trim().toLowerCase();
     const choferId = nombreNorm ? drivers.find(d => d.nombre.trim().toLowerCase().includes(nombreNorm) || nombreNorm.includes(d.nombre.trim().toLowerCase()))?.id : null;
     setScanOpen(false);
@@ -161,7 +204,6 @@ export default function ViajesPage() {
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
 
-      // Buscar la fila de encabezados (la que tenga varias columnas conocidas del reporte de TRADELOG)
       const marcadores = ['documento viaje', 'vehículo tractor', 'vehiculo tractor', 'fecha de salida', 'kilómetros', 'kilometros'];
       let headerRowIdx = -1;
       let headerMap: Record<string, number> = {};
@@ -198,6 +240,8 @@ export default function ViajesPage() {
       const cDestinoRs = col('destino - razón social', 'destino - razon social');
       const cDestinoLoc = col('destino - localidad');
       const cObs = col('observaciones');
+      const cTipoViajeDesc = col('tipo viaje - descripción', 'tipo viaje - descripcion');
+      const cTipoViajeCod = col('tipo viaje - código', 'tipo viaje - codigo');
 
       const candidatas: any[] = [];
       for (let i = headerRowIdx + 1; i < rows.length; i++) {
@@ -209,6 +253,7 @@ export default function ViajesPage() {
         if (!documento && !patenteRaw && !fecha) continue; // fila vacía
 
         const vehiculoId = patenteRaw ? vehicles.find(v => normPatente(v.patente) === normPatente(String(patenteRaw)))?.id : null;
+        const vehiculo = vehiculoId ? vehicles.find(v => v.id === vehiculoId) : null;
         const choferNombre = cChofer >= 0 ? row[cChofer] : null;
         const choferId = choferNombre ? drivers.find(d => namesMatch(d.nombre, String(choferNombre)))?.id : null;
         const ayudante = cAyudante >= 0 ? row[cAyudante] : null;
@@ -216,6 +261,19 @@ export default function ViajesPage() {
         const origen = (cOrigenRs >= 0 && row[cOrigenRs]) || (cOrigenLoc >= 0 ? row[cOrigenLoc] : null);
         const destino = (cDestinoRs >= 0 && row[cDestinoRs]) || (cDestinoLoc >= 0 ? row[cDestinoLoc] : null);
         const obs = cObs >= 0 ? row[cObs] : null;
+        const tipoDesc = cTipoViajeDesc >= 0 ? row[cTipoViajeDesc] : null;
+        const tipoCod = cTipoViajeCod >= 0 ? row[cTipoViajeCod] : null;
+        const zona = extractZona(tipoDesc);
+        const tienePeon = /pop|peon/i.test(String(tipoDesc || '')) || /pop/i.test(String(tipoCod || '')) || !!ayudante;
+        const km = cKm >= 0 ? toNumber(row[cKm]) : null;
+
+        // Prioridad del costo: 1) Importe Venta del archivo, 2) tarifa por zona, 3) tarifa por km
+        let costo = cVenta >= 0 ? toNumber(row[cVenta]) : null;
+        if (!costo && vehiculo?.tipo_unidad) {
+          const tz = zona ? findTarifaByZona(tarifas, vehiculo.tipo_unidad, zona) : null;
+          const tk = !tz && km ? findTarifa(tarifas, vehiculo.tipo_unidad, km) : null;
+          costo = tz?.precio ?? tk?.precio ?? null;
+        }
 
         const notasParts = [];
         if (documento) notasParts.push(`HR ${documento}`);
@@ -229,8 +287,10 @@ export default function ViajesPage() {
           driver_id: choferId || null,
           origen: origen ? String(origen) : '',
           destino: destino ? String(destino) : '',
-          km: cKm >= 0 ? toNumber(row[cKm]) : null,
-          costo_estimado: cVenta >= 0 ? toNumber(row[cVenta]) : null,
+          km,
+          zona,
+          costo_estimado: costo,
+          tiene_peon: tienePeon,
           notas: notasParts.join(' · '),
         });
       }
@@ -243,9 +303,13 @@ export default function ViajesPage() {
 
       const sinVehiculo = candidatas.filter(c => !c.vehicle_id).length;
       const sinChofer = candidatas.filter(c => !c.driver_id).length;
+      const sinCosto = candidatas.filter(c => !c.costo_estimado).length;
+      const conPeon = candidatas.filter(c => c.tiene_peon).length;
       const confirmMsg = `Encontré ${candidatas.length} viajes para importar.` +
-        (sinVehiculo ? `\n${sinVehiculo} sin vehículo identificado (patente no coincide con ninguna cargada en Flota).` : '') +
+        (sinVehiculo ? `\n${sinVehiculo} sin vehículo identificado.` : '') +
         (sinChofer ? `\n${sinChofer} sin chofer identificado.` : '') +
+        (sinCosto ? `\n${sinCosto} sin costo (ni en el Excel ni en el tarifario para su zona/km).` : '') +
+        (conPeon ? `\n${conPeon} marcados con peón.` : '') +
         `\n\n¿Confirmás la importación?`;
       if (!confirm(confirmMsg)) { setImporting(false); return; }
 
@@ -292,15 +356,24 @@ export default function ViajesPage() {
           </select>
           <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} />
         </div>
-        <button className="btn btn-secondary" onClick={exportExcel}>Descargar Excel</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-secondary" onClick={exportExcel}>Descargar Excel</button>
+          {trips.length > 0 && <button className="btn btn-danger-outline" onClick={vaciarViajes}>Vaciar todos los viajes</button>}
+        </div>
       </div>
+
+      {resumenMes && (
+        <div className="card card-pad" style={{ marginBottom: 16, fontSize: 14 }}>
+          <strong>{filterMonth}</strong>: {resumenMes.cantidad} viaje{resumenMes.cantidad === 1 ? '' : 's'}, {fmtMoney(resumenMes.total)} en costo estimado total.
+        </div>
+      )}
 
       <div className="card table-wrap">
         {loading ? <div className="empty">Cargando...</div> : filtered.length === 0 ? (
-          <div className="empty"><h3>Sin viajes para mostrar</h3><p>Cargá un viaje manualmente o escaneá una hoja de ruta.</p></div>
+          <div className="empty"><h3>Sin viajes para mostrar</h3><p>Cargá un viaje manualmente, escaneá una hoja de ruta, o importá un Excel.</p></div>
         ) : (
           <table>
-            <thead><tr><th>Fecha</th><th>Vehículo</th><th>Chofer</th><th>Recorrido</th><th>Km</th><th>Costo estimado</th><th></th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Vehículo</th><th>Chofer</th><th>Recorrido</th><th>Zona</th><th>Km</th><th>Costo estimado</th><th>Peón</th><th></th></tr></thead>
             <tbody>
               {filtered.map(t => {
                 const v = vehicles.find(v => v.id === t.vehicle_id);
@@ -311,8 +384,10 @@ export default function ViajesPage() {
                     <td>{v ? v.patente : '—'}</td>
                     <td>{dr?.nombre || '—'}</td>
                     <td>{t.origen || '—'} → {t.destino || '—'}</td>
+                    <td>{t.zona || '—'}</td>
                     <td>{fmtKm(t.km)}</td>
                     <td>{t.costo_estimado ? fmtMoney(t.costo_estimado) : '—'}</td>
+                    <td>{t.tiene_peon ? <span className="badge warn"><span className="dot" />Sí</span> : '—'}</td>
                     <td>
                       <button className="btn btn-ghost" onClick={() => openForm(t, null)}>Editar</button>
                       <button className="btn btn-ghost" onClick={() => deleteTrip(t.id)}>Eliminar</button>
@@ -352,6 +427,11 @@ export default function ViajesPage() {
               <div className="field"><label>Destino</label><input name="destino" defaultValue={form?.destino || ''} /></div>
             </div>
             <div className="field">
+              <label>Zona (opcional)</label>
+              <input value={fZona} onChange={e => setFZona(e.target.value)} list="zonas-existentes" placeholder="Ej: Zona 1" />
+              <datalist id="zonas-existentes">{zonasExistentes.map(z => <option key={z} value={z} />)}</datalist>
+            </div>
+            <div className="field">
               <label>Costo estimado del viaje</label>
               <input type="number" step="0.01" value={fCosto} onChange={e => setFCosto(e.target.value)} placeholder="0" />
               {vehiculoSel && !vehiculoSel.tipo_unidad && (
@@ -359,11 +439,20 @@ export default function ViajesPage() {
               )}
               {sugerencia && (
                 <div className="field-hint">
-                  Sugerido según tarifario: <strong>{fmtMoney(sugerencia.precio)}</strong>{' '}
+                  Sugerido según tarifario ({sugerenciaZona ? 'por zona' : 'por km'}): <strong>{fmtMoney(sugerencia.precio)}</strong>{' '}
                   <button type="button" className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setFCosto(String(sugerencia.precio))}>Usar</button>
                 </div>
               )}
             </div>
+            <div className="field">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, color: 'var(--ink)' }}>
+                <input type="checkbox" checked={fTienePeon} onChange={e => setFTienePeon(e.target.checked)} style={{ width: 'auto' }} />
+                Este viaje llevó peón
+              </label>
+            </div>
+            {fTienePeon && (
+              <div className="field"><label>Costo del peón</label><input type="number" step="0.01" value={fCostoPeon} onChange={e => setFCostoPeon(e.target.value)} placeholder="0" /></div>
+            )}
             <div className="field"><label>Observaciones</label><textarea name="notas" rows={2} defaultValue={form?.notas || ''} /></div>
           </div>
           <div className="modal-foot">
