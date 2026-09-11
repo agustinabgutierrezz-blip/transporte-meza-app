@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import { supabaseBrowser } from '@/lib/supabaseClient';
 import { fmtDate, fmtKm, fmtMoney, uid } from '@/lib/utils';
 import { Modal, ScanModal, useToast } from '@/components/ui';
-import { Driver, Tarifa, Trip, Vehicle, findTarifa, findTarifaByZona } from '@/lib/types';
+import { Driver, Tarifa, Trip, Vehicle, findTarifa, findTarifaByZona, CATEGORIAS_VIAJE } from '@/lib/types';
 
 function normPatente(s: string) { return s.replace(/[^A-Za-z0-9]/g, '').toUpperCase(); }
 function nameTokens(s: string) {
@@ -64,6 +64,7 @@ export default function ViajesPage() {
   const [fVehiculoId, setFVehiculoId] = useState('');
   const [fKm, setFKm] = useState<string>('');
   const [fZona, setFZona] = useState<string>('');
+  const [fCategoria, setFCategoria] = useState<string>('');
   const [fCosto, setFCosto] = useState<string>('');
   const [fTienePeon, setFTienePeon] = useState(false);
   const [fCostoPeon, setFCostoPeon] = useState<string>('');
@@ -103,6 +104,7 @@ export default function ViajesPage() {
     setFVehiculoId(form?.vehicle_id || '');
     setFKm(form?.km !== undefined && form?.km !== null ? String(form.km) : '');
     setFZona(form?.zona || '');
+    setFCategoria(form?.categoria || '');
     setFCosto(form?.costo_estimado !== undefined && form?.costo_estimado !== null ? String(form.costo_estimado) : '');
     setFTienePeon(!!form?.tiene_peon);
     setFCostoPeon(form?.costo_peon !== undefined && form?.costo_peon !== null ? String(form.costo_peon) : '');
@@ -121,6 +123,7 @@ export default function ViajesPage() {
       destino: String(fd.get('destino') || '').trim(),
       km: fKm ? Number(fKm) : null,
       zona: fZona || null,
+      categoria: fCategoria || null,
       notas: String(fd.get('notas') || '').trim(),
       costo_estimado: fCosto ? Number(fCosto) : null,
       tiene_peon: fTienePeon,
@@ -168,7 +171,7 @@ export default function ViajesPage() {
       const dr = drivers.find(d => d.id === t.driver_id);
       return {
         Fecha: fmtDate(t.fecha), Patente: v?.patente || '', Vehiculo: v ? `${v.marca} ${v.modelo}` : '', Chofer: dr?.nombre || '',
-        Origen: t.origen || '', Destino: t.destino || '', Km: t.km || '', Zona: t.zona || '',
+        Origen: t.origen || '', Destino: t.destino || '', Km: t.km || '', Zona: t.zona || '', Categoria: t.categoria || '',
         'Costo estimado': t.costo_estimado || '', Peon: t.tiene_peon ? 'Sí' : 'No', 'Costo peón': t.costo_peon || '',
         Observaciones: t.notas || '',
       };
@@ -264,6 +267,7 @@ export default function ViajesPage() {
         const tipoDesc = cTipoViajeDesc >= 0 ? row[cTipoViajeDesc] : null;
         const tipoCod = cTipoViajeCod >= 0 ? row[cTipoViajeCod] : null;
         const zona = extractZona(tipoDesc);
+        const categoria = (!zona && tipoDesc) ? String(tipoDesc).trim() : null;
         const tienePeon = /pop|peon/i.test(String(tipoDesc || '')) || /pop/i.test(String(tipoCod || '')) || !!ayudante;
         const km = cKm >= 0 ? toNumber(row[cKm]) : null;
 
@@ -289,6 +293,7 @@ export default function ViajesPage() {
           destino: destino ? String(destino) : '',
           km,
           zona,
+          categoria,
           costo_estimado: costo,
           tiene_peon: tienePeon,
           notas: notasParts.join(' · '),
@@ -380,7 +385,7 @@ export default function ViajesPage() {
           <div className="empty"><h3>Sin viajes para mostrar</h3><p>Cargá un viaje manualmente, escaneá una hoja de ruta, o importá un Excel.</p></div>
         ) : (
           <table>
-            <thead><tr><th>Fecha</th><th>Vehículo</th><th>Chofer</th><th>Recorrido</th><th>Zona</th><th>Km</th><th>Costo estimado</th><th>Peón</th><th></th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Vehículo</th><th>Chofer</th><th>Recorrido</th><th>Zona</th><th>Categoría</th><th>Km</th><th>Costo estimado</th><th>Peón</th><th></th></tr></thead>
             <tbody>
               {filtered.map(t => {
                 const v = vehicles.find(v => v.id === t.vehicle_id);
@@ -392,6 +397,7 @@ export default function ViajesPage() {
                     <td>{dr?.nombre || '—'}</td>
                     <td>{t.origen || '—'} → {t.destino || '—'}</td>
                     <td>{t.zona || '—'}</td>
+                    <td>{t.categoria || '—'}</td>
                     <td>{fmtKm(t.km)}</td>
                     <td>{t.costo_estimado ? fmtMoney(t.costo_estimado) : '—'}</td>
                     <td>{t.tiene_peon ? <span className="badge warn"><span className="dot" />Sí</span> : '—'}</td>
@@ -437,6 +443,11 @@ export default function ViajesPage() {
               <label>Zona (opcional)</label>
               <input value={fZona} onChange={e => setFZona(e.target.value)} list="zonas-existentes" placeholder="Ej: Zona 1" />
               <datalist id="zonas-existentes">{zonasExistentes.map(z => <option key={z} value={z} />)}</datalist>
+            </div>
+            <div className="field">
+              <label>Categoría / observación especial (opcional)</label>
+              <input value={fCategoria} onChange={e => setFCategoria(e.target.value)} list="categorias-viaje" placeholder="Ej: TEMPERATURA CONTROLADA" />
+              <datalist id="categorias-viaje">{CATEGORIAS_VIAJE.map(c => <option key={c} value={c} />)}</datalist>
             </div>
             <div className="field">
               <label>Costo estimado del viaje</label>
