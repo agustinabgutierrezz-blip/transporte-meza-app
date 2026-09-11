@@ -305,10 +305,17 @@ export default function ViajesPage() {
       const sinChofer = candidatas.filter(c => !c.driver_id).length;
       const sinCosto = candidatas.filter(c => !c.costo_estimado).length;
       const conPeon = candidatas.filter(c => c.tiene_peon).length;
+      const vehiculosSinTipo = new Set(
+        candidatas.filter(c => c.vehicle_id && !c.costo_estimado)
+          .map(c => vehicles.find(v => v.id === c.vehicle_id))
+          .filter(v => v && !v.tipo_unidad)
+          .map(v => v!.patente)
+      );
       const confirmMsg = `Encontré ${candidatas.length} viajes para importar.` +
         (sinVehiculo ? `\n${sinVehiculo} sin vehículo identificado.` : '') +
         (sinChofer ? `\n${sinChofer} sin chofer identificado.` : '') +
         (sinCosto ? `\n${sinCosto} sin costo (ni en el Excel ni en el tarifario para su zona/km).` : '') +
+        (vehiculosSinTipo.size ? `\nOjo: ${Array.from(vehiculosSinTipo).join(', ')} no ${vehiculosSinTipo.size === 1 ? 'tiene' : 'tienen'} "Tipo de unidad" cargado en Flota — por eso no se pudo calcular su costo por tarifario. Cargalo y volvé a importar para que tome el precio.` : '') +
         (conPeon ? `\n${conPeon} marcados con peón.` : '') +
         `\n\n¿Confirmás la importación?`;
       if (!confirm(confirmMsg)) { setImporting(false); return; }
