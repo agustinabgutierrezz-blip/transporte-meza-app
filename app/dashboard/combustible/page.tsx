@@ -15,6 +15,7 @@ export default function CombustiblePage() {
   const [editing, setEditing] = useState<Fuel | null>(null);
   const [prefill, setPrefill] = useState<Partial<Fuel> | null>(null);
   const [filterVehicle, setFilterVehicle] = useState('');
+  const [filterMonth, setFilterMonth] = useState('');
   const showToast = useToast();
 
   async function load() {
@@ -28,8 +29,15 @@ export default function CombustiblePage() {
   }
   useEffect(() => { load(); }, []);
 
-  const filtered = useMemo(() => fuel.filter(f => !filterVehicle || f.vehicle_id === filterVehicle), [fuel, filterVehicle]);
+  const filtered = useMemo(() => fuel
+    .filter(f => !filterVehicle || f.vehicle_id === filterVehicle)
+    .filter(f => !filterMonth || f.fecha?.slice(0, 7) === filterMonth), [fuel, filterVehicle, filterMonth]);
   const total = fuel.reduce((s, f) => s + (Number(f.total) || 0), 0);
+  const resumenMes = useMemo(() => {
+    if (!filterMonth) return null;
+    const totalMes = filtered.reduce((s, f) => s + (Number(f.total) || 0), 0);
+    return { cantidad: filtered.length, total: totalMes };
+  }, [filtered, filterMonth]);
 
   async function saveFuel(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -112,9 +120,16 @@ export default function CombustiblePage() {
             <option value="">Todos los vehículos</option>
             {vehicles.map(v => <option key={v.id} value={v.id}>{v.patente} · {v.marca} {v.modelo}</option>)}
           </select>
+          <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} />
         </div>
         <button className="btn btn-secondary" onClick={exportExcel}>Descargar Excel</button>
       </div>
+
+      {resumenMes && (
+        <div className="card card-pad" style={{ marginBottom: 16, fontSize: 14 }}>
+          <strong>{filterMonth}</strong>: {resumenMes.cantidad} carga{resumenMes.cantidad === 1 ? '' : 's'} de combustible, {fmtMoney(resumenMes.total)} en total.
+        </div>
+      )}
 
       <div className="card table-wrap">
         {loading ? <div className="empty">Cargando...</div> : filtered.length === 0 ? (
