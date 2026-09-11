@@ -1,10 +1,23 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabaseBrowser } from '@/lib/supabaseClient';
 import { fmtDate, fmtMoney } from '@/lib/utils';
 import { Modal, useToast, FileField, FileThumb, ScanModal } from '@/components/ui';
 import { Invoice, Settings, Cliente } from '@/lib/types';
+
+function nameTokens(s: string) {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
+function clienteMatches(a: string, b: string) {
+  const ta = nameTokens(a), tb = nameTokens(b);
+  if (!ta.length || !tb.length) return false;
+  const shorter = ta.length <= tb.length ? ta : tb;
+  const longer = ta.length <= tb.length ? tb : ta;
+  const common = shorter.filter(t => longer.includes(t)).length;
+  return common >= Math.min(shorter.length, 2);
+}
 
 export default function FacturacionPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -17,6 +30,11 @@ export default function FacturacionPage() {
   const [invFile, setInvFile] = useState<{ path: string; name: string } | null>(null);
   const [afipFile, setAfipFile] = useState<{ path: string; name: string } | null>(null);
   const [iibbFile, setIibbFile] = useState<{ path: string; name: string } | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
+  const [bulkResults, setBulkResults] = useState<{ name: string; ok: boolean; detail: string }[]>([]);
+  const bulkFileRef = useRef<HTMLInputElement>(null);
   const showToast = useToast();
 
   async function load() {
@@ -125,6 +143,86 @@ export default function FacturacionPage() {
     load();
   }
 
+  async function handleBulkFiles(files: FileList) {
+    if (files.length === 0) return;
+    setBulkProcessing(true);
+    setBulkResults([]);
+    setBulkProgress({ done: 0, total: files.length });
+
+    const supabase = supabaseBrowser();
+    const { data: { user } } = await supabase.auth.getUser();
+    let clientesLocal = [...clientes]; // copia local para no crear el mismo cliente dos veces en la misma tanda
+    const results: { name: string; ok: boolean; detail: string }[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const dataUrl: string = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const base64 = dataUrl.split(',')[1];
+
+        const res = await fetch('/api/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64, mediaType: file.type || 'application/pdf', kind: 'factura' }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || 'No se pudo leer la factura');
+        const extracted = data.extracted || {};
+
+        // Buscar o crear cliente
+        let clienteId: string | null = null;
+        if (extracted.cliente) {
+          const match = clientesLocal.find(c => clienteMatches(c.razon_social, extracted.cliente));
+          if (match) {
+            clienteId = match.id;
+          } else {
+            const { data: nuevo, error: errCli } = await supabase.from('clientes')
+              .insert({ owner: user!.id, razon_social: String(extracted.cliente).trim(), cuit: extracted.cuit_cliente || null })
+              .select().single();
+            if (errCli) throw new Error('No se pudo crear el cliente');
+            clientesLocal = [...clientesLocal, nuevo as Cliente];
+            clienteId = nuevo.id;
+          }
+        }
+
+        // Subir el archivo
+        const ext = file.name.split('.').pop() || 'pdf';
+        const path = `${user!.id}/facturas/${Date.now()}-${i}.${ext}`;
+        const { error: errUpload } = await supabase.storage.from('docs').upload(path, file, { upsert: true });
+        if (errUpload) throw new Error('No se pudo subir el archivo');
+
+        const monto = Number(extracted.monto) || null;
+        const { error: errInsert } = await supabase.from('invoices').insert({
+          owner: user!.id,
+          fecha: extracted.fecha || null,
+          monto,
+          descripcion: extracted.descripcion || '',
+          cliente_id: clienteId,
+          file_path: path,
+          file_name: file.name,
+        });
+        if (errInsert) throw new Error('No se pudo guardar la factura');
+
+        results.push({ name: file.name, ok: true, detail: `${extracted.cliente || 'sin cliente'} · ${monto ? fmtMoney(monto) : 'sin monto'}` });
+      } catch (err: any) {
+        results.push({ name: file.name, ok: false, detail: err?.message || 'Error desconocido' });
+      }
+      setBulkProgress({ done: i + 1, total: files.length });
+      setBulkResults([...results]);
+    }
+
+    setClientes(clientesLocal);
+    setBulkProcessing(false);
+    load();
+    const okCount = results.filter(r => r.ok).length;
+    showToast(`${okCount} de ${results.length} facturas cargadas`, okCount === results.length ? 'success' : 'error');
+  }
+
   function exportExcel() {
     if (invoices.length === 0) { showToast('No hay facturas para exportar', 'error'); return; }
     const alicuotaPct = Number(settings?.alicuota_iva) || 21;
@@ -166,6 +264,7 @@ export default function FacturacionPage() {
         <div><h1>Facturación</h1><div className="sub">Facturas, IVA estimado y datos fiscales</div></div>
         <div className="topbar-actions">
           <button className="btn btn-secondary" onClick={() => setScanOpen(true)}>Escanear factura</button>
+          <button className="btn btn-secondary" onClick={() => setBulkOpen(true)}>Carga masiva de facturas</button>
           <button className="btn btn-secondary" onClick={exportExcel}>Descargar Excel</button>
           <button className="btn btn-primary" onClick={() => setFormOpen(true)}>+ Cargar factura</button>
         </div>
@@ -255,6 +354,44 @@ export default function FacturacionPage() {
       </Modal>
 
       <ScanModal open={scanOpen} kind="factura" onClose={() => setScanOpen(false)} onExtracted={handleExtracted} />
+
+      <Modal open={bulkOpen} onClose={() => { if (!bulkProcessing) { setBulkOpen(false); setBulkResults([]); } }}>
+        <div className="modal-head"><h2>Carga masiva de facturas</h2>
+          {!bulkProcessing && <button type="button" className="modal-close" onClick={() => { setBulkOpen(false); setBulkResults([]); }}>&times;</button>}
+        </div>
+        <div className="modal-body">
+          {!bulkProcessing && bulkResults.length === 0 && (
+            <>
+              <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginBottom: 14 }}>
+                Seleccioná todas las fotos o PDFs de facturas que quieras cargar de una vez. La app va a leer cada una,
+                identificar el cliente (creándolo si todavía no existe) y cargarlas a la cuenta corriente automáticamente.
+              </p>
+              <input ref={bulkFileRef} type="file" accept="image/*,application/pdf" multiple
+                onChange={(e) => { if (e.target.files) handleBulkFiles(e.target.files); }} />
+            </>
+          )}
+          {bulkProcessing && (
+            <div className="scan-status" style={{ marginBottom: 14 }}>
+              <div className="spinner" /> Procesando {bulkProgress.done} de {bulkProgress.total}...
+            </div>
+          )}
+          {bulkResults.length > 0 && (
+            <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+              {bulkResults.map((r, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--line)', fontSize: 13 }}>
+                  <span style={{ fontWeight: 600, color: r.ok ? 'var(--ok)' : 'var(--danger)' }}>{r.ok ? '✓' : '✗'} {r.name}</span>
+                  <span style={{ color: 'var(--ink-soft)', textAlign: 'right' }}>{r.detail}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button type="button" className="btn btn-secondary" disabled={bulkProcessing} onClick={() => { setBulkOpen(false); setBulkResults([]); }}>
+            {bulkResults.length > 0 ? 'Cerrar' : 'Cancelar'}
+          </button>
+        </div>
+      </Modal>
     </>
   );
 }
