@@ -8,14 +8,19 @@ import { Vehicle } from '@/lib/types';
 
 export default function FlotaPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [tiposUnidad, setTiposUnidad] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const showToast = useToast();
 
   async function load() {
     const supabase = supabaseBrowser();
-    const { data } = await supabase.from('vehicles').select('*').order('created_at', { ascending: false });
+    const [{ data }, { data: tarifasData }] = await Promise.all([
+      supabase.from('vehicles').select('*').order('created_at', { ascending: false }),
+      supabase.from('tarifas').select('tipo_unidad'),
+    ]);
     setVehicles(data || []);
+    setTiposUnidad(Array.from(new Set((tarifasData || []).map((t: any) => t.tipo_unidad))));
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -85,7 +90,10 @@ export default function FlotaPage() {
               <div className="field"><label>Año</label><input name="anio" type="number" placeholder="2019" /></div>
               <div className="field"><label>Kilometraje actual</label><input name="km" type="number" placeholder="152000" /></div>
             </div>
-            <div className="field"><label>Tipo de unidad (para tarifas)</label><input name="tipo_unidad" placeholder="Ej: Liviano 4500 kg." /></div>
+            <div className="field"><label>Tipo de unidad (para tarifas)</label>
+              <input name="tipo_unidad" placeholder="Ej: Liviano 4500 kg." list="tipos-unidad-flota" />
+              <datalist id="tipos-unidad-flota">{tiposUnidad.map(t => <option key={t} value={t} />)}</datalist>
+            </div>
           </div>
           <div className="modal-foot">
             <button type="button" className="btn btn-secondary" onClick={() => setOpen(false)}>Cancelar</button>
