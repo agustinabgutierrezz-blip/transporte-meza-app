@@ -59,14 +59,15 @@ export default function TarifasPage() {
     const kmHastaRaw = String(fd.get('km_hasta') || '').trim();
     const km_hasta = kmHastaRaw === '' ? null : Number(kmHastaRaw);
     const precio = Number(fd.get('precio')) || null;
+    const zona = String(fd.get('zona') || '').trim() || null;
     if (!tipo_unidad || !precio) { showToast('Completá el tipo de unidad y el precio', 'error'); return; }
     const supabase = supabaseBrowser();
     let error;
     if (editing) {
-      ({ error } = await supabase.from('tarifas').update({ tipo_unidad, km_desde, km_hasta, precio }).eq('id', editing.id));
+      ({ error } = await supabase.from('tarifas').update({ tipo_unidad, km_desde, km_hasta, precio, zona }).eq('id', editing.id));
     } else {
       const { data: { user } } = await supabase.auth.getUser();
-      ({ error } = await supabase.from('tarifas').insert({ owner: user!.id, tipo_unidad, km_desde, km_hasta, precio }));
+      ({ error } = await supabase.from('tarifas').insert({ owner: user!.id, tipo_unidad, km_desde, km_hasta, precio, zona }));
     }
     if (error) { showToast('No se pudo guardar. Probá de nuevo.', 'error'); return; }
     showToast('Tarifa guardada', 'success');
@@ -109,16 +110,16 @@ export default function TarifasPage() {
         return;
       }
 
-      const nuevas: { tipo_unidad: string; km_desde: number; km_hasta: number | null; precio: number }[] = [];
+      const nuevas: { tipo_unidad: string; km_desde: number; km_hasta: number | null; precio: number; zona: string }[] = [];
       for (let i = headerRowIdx + 1; i < rows.length; i++) {
         const row = rows[i];
         if (!row) continue;
         const tipo = row[0];
         if (!tipo || typeof tipo !== 'string' || !tipo.trim()) continue;
-        bandCols.forEach(b => {
+        bandCols.forEach((b, bi) => {
           const precio = parsePrecio(row[b.col]);
           if (precio !== null && precio > 0) {
-            nuevas.push({ tipo_unidad: tipo.trim(), km_desde: b.desde, km_hasta: b.hasta, precio });
+            nuevas.push({ tipo_unidad: tipo.trim(), km_desde: b.desde, km_hasta: b.hasta, precio, zona: `Zona ${bi + 1}` });
           }
         });
       }
@@ -160,9 +161,9 @@ export default function TarifasPage() {
       </div>
 
       <div className="card card-pad" style={{ marginBottom: 20, fontSize: 13, color: 'var(--ink-soft)' }}>
-        Subís tu Excel con una columna "Tipo de Unidad" y columnas de rango en km (ej. "0-30", "31-60"), y la app arma la tabla sola.
-        También podés cargar o editar cada tarifa a mano. Una vez cargadas, en <strong>Viajes</strong> la app te va a sugerir el costo automáticamente
-        según el tipo de unidad del vehículo y los km del viaje.
+        Subís tu Excel con una columna "Tipo de Unidad" y columnas de rango en km (ej. "0-30", "31-60"), y la app arma la tabla sola,
+        asignando Zona 1 a la primera columna de rango, Zona 2 a la segunda, y así. También podés cargar o editar cada tarifa a mano.
+        En <strong>Viajes</strong>, la app usa esto para sugerirte el costo según el tipo de unidad y, si tu reporte trae la zona indicada, la usa directamente.
       </div>
 
       {loading ? <div className="empty"><div className="spinner" style={{ margin: '0 auto 10px' }} />Cargando...</div> :
@@ -177,10 +178,11 @@ export default function TarifasPage() {
             <div key={tipo} className="card table-wrap" style={{ marginBottom: 16 }}>
               <div style={{ padding: '14px 18px 4px', fontWeight: 700, fontFamily: 'var(--font-display)', fontSize: 18 }}>{tipo}</div>
               <table>
-                <thead><tr><th>Rango (km)</th><th>Precio</th><th></th></tr></thead>
+                <thead><tr><th>Zona</th><th>Rango (km)</th><th>Precio</th><th></th></tr></thead>
                 <tbody>
                   {items.sort((a, b) => a.km_desde - b.km_desde).map(t => (
                     <tr key={t.id}>
+                      <td style={{ fontWeight: 600 }}>{t.zona || '—'}</td>
                       <td>{t.km_desde} - {t.km_hasta ?? '+'}</td>
                       <td style={{ fontWeight: 600 }}>{fmtMoney(t.precio)}</td>
                       <td>
@@ -208,6 +210,7 @@ export default function TarifasPage() {
               <div className="field"><label>Desde (km)</label><input name="km_desde" type="number" defaultValue={editing?.km_desde ?? 0} /></div>
               <div className="field"><label>Hasta (km, vacío = sin límite)</label><input name="km_hasta" type="number" defaultValue={editing?.km_hasta ?? ''} /></div>
             </div>
+            <div className="field"><label>Zona (opcional, ej: "Zona 1")</label><input name="zona" defaultValue={editing?.zona || ''} placeholder="Zona 1" /></div>
             <div className="field"><label>Precio</label><input name="precio" type="number" step="0.01" defaultValue={editing?.precio || ''} /></div>
           </div>
           <div className="modal-foot">
