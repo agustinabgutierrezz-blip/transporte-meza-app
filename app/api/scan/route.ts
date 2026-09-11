@@ -25,7 +25,9 @@ Si no podés determinar un campo con certeza, poné null en ese campo. No invent
     ? `Sos un asistente que extrae datos de una factura argentina (emitida por un monotributista o responsable inscripto, tipo A/B/C, con CAE de ARCA/AFIP) a partir de una imagen o PDF. Devolvé SOLO un objeto JSON válido, sin texto adicional, sin bloques de código ni markdown, con exactamente estos campos:
 - fecha (Fecha de Emisión de la factura, formato YYYY-MM-DD, si se puede identificar, sino null)
 - monto (Importe Total de la factura, number o null; usá el monto final con IVA incluido)
-- descripcion (armá un texto breve con: tipo y letra de comprobante, punto de venta y número (ej "Factura A 0006-00000014"), el nombre/razón social del cliente al que se le factura (el campo "Apellido y Nombre / Razón Social", NO el emisor), y el concepto facturado si figura. string o null)
+- cliente (el nombre/razón social del cliente al que se le factura — el campo "Apellido y Nombre / Razón Social" del receptor, NO el emisor de la factura. string o null)
+- cuit_cliente (el CUIT del cliente/receptor si figura, formato con guiones tipo "30-69617300-8", string o null)
+- descripcion (armá un texto breve con: tipo y letra de comprobante, punto de venta y número (ej "Factura A 0006-00000014"), y el concepto facturado si figura. NO repitas el nombre del cliente acá, ya va en el campo "cliente". string o null)
 Si no podés determinar un campo con certeza, poné null en ese campo. No inventes datos.`
     : `Sos un asistente que extrae datos de un ticket, remito o comprobante de carga de combustible/gasoil argentino (de una estación de servicio o distribuidora) a partir de una imagen. Devolvé SOLO un objeto JSON válido, sin texto adicional, sin bloques de código ni markdown, con exactamente estos campos:
 - fecha (formato YYYY-MM-DD, si se puede identificar, sino null)
