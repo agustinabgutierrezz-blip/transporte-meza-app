@@ -1,10 +1,43 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabaseBrowser } from '@/lib/supabaseClient';
 import { fmtDate, fmtKm, fmtMoney, uid } from '@/lib/utils';
 import { Modal, ScanModal, useToast } from '@/components/ui';
 import { Driver, Tarifa, Trip, Vehicle, findTarifa } from '@/lib/types';
+
+function normPatente(s: string) { return s.replace(/[^A-Za-z0-9]/g, '').toUpperCase(); }
+function nameTokens(s: string) {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
+function namesMatch(a: string, b: string) {
+  const ta = nameTokens(a), tb = nameTokens(b);
+  if (!ta.length || !tb.length) return false;
+  const shorter = ta.length <= tb.length ? ta : tb;
+  const longer = ta.length <= tb.length ? tb : ta;
+  const common = shorter.filter(t => longer.includes(t)).length;
+  return common >= Math.min(shorter.length, 2);
+}
+function excelDateToStr(v: any): string | null {
+  if (!v) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === 'number') {
+    const d = XLSX.SSF.parse_date_code(v);
+    if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+  }
+  if (typeof v === 'string') {
+    const m = v.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if (m) { const yr = m[3].length === 2 ? '20' + m[3] : m[3]; return `${yr}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; }
+  }
+  return null;
+}
+function toNumber(v: any): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return v;
+  const n = Number(String(v).replace(/\./g, '').replace(',', '.'));
+  return isNaN(n) ? null : n;
+}
 
 export default function ViajesPage() {
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -18,6 +51,8 @@ export default function ViajesPage() {
   const [prefill, setPrefill] = useState<Partial<Trip> | null>(null);
   const [filterVehicle, setFilterVehicle] = useState('');
   const [filterMonth, setFilterMonth] = useState('');
+  const [importing, setImporting] = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
   const showToast = useToast();
 
   // Estado del formulario (para calcular la sugerencia de tarifa en vivo)
@@ -102,8 +137,7 @@ export default function ViajesPage() {
     XLSX.writeFile(wb, `viajes_${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
-  function handleExtracted(extracted: any) {
-    const vehiculoId = extracted.patente ? vehicles.find(v => v.patente.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === String(extracted.patente).replace(/[^A-Za-z0-9]/g, '').toUpperCase())?.id : null;
+  function handleExtracted(extracted: any) {    const vehiculoId = extracted.patente ? vehicles.find(v => v.patente.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === String(extracted.patente).replace(/[^A-Za-z0-9]/g, '').toUpperCase())?.id : null;
     const nombreNorm = extracted.chofer?.trim().toLowerCase();
     const choferId = nombreNorm ? drivers.find(d => d.nombre.trim().toLowerCase().includes(nombreNorm) || nombreNorm.includes(d.nombre.trim().toLowerCase()))?.id : null;
     setScanOpen(false);
@@ -119,6 +153,120 @@ export default function ViajesPage() {
     showToast('Datos leídos. Revisalos antes de guardar.', 'success');
   }
 
+  async function handleImportViajes(file: File) {
+    setImporting(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
+
+      // Buscar la fila de encabezados (la que tenga varias columnas conocidas del reporte de TRADELOG)
+      const marcadores = ['documento viaje', 'vehículo tractor', 'vehiculo tractor', 'fecha de salida', 'kilómetros', 'kilometros'];
+      let headerRowIdx = -1;
+      let headerMap: Record<string, number> = {};
+      for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const row = rows[i] || [];
+        const found: Record<string, number> = {};
+        row.forEach((cell, ci) => {
+          if (typeof cell === 'string' && cell.trim()) found[cell.trim().toLowerCase()] = ci;
+        });
+        const hits = marcadores.filter(m => found[m] !== undefined).length;
+        if (hits >= 2) { headerRowIdx = i; headerMap = found; break; }
+      }
+      if (headerRowIdx === -1) {
+        showToast('No reconocí el formato de ese Excel. Probá con otro archivo o cargá los viajes a mano.', 'error');
+        setImporting(false);
+        return;
+      }
+
+      const col = (...names: string[]) => {
+        for (const n of names) { if (headerMap[n] !== undefined) return headerMap[n]; }
+        return -1;
+      };
+      const cDocumento = col('documento viaje');
+      const cFechaSalida = col('fecha de salida');
+      const cFechaGen = col('fecha de generación', 'fecha de generacion');
+      const cKm = col('kilómetros', 'kilometros', 'kms');
+      const cPatente = col('vehículo tractor', 'vehiculo tractor');
+      const cChofer = col('chofer - apellido y nombre');
+      const cAyudante = col('ayudante - apellido y nombre');
+      const cVenta = col('importe venta');
+      const cCliente = col('cliente - razón social', 'cliente - razon social');
+      const cOrigenRs = col('origen - razón social', 'origen - razon social');
+      const cOrigenLoc = col('origen - localidad');
+      const cDestinoRs = col('destino - razón social', 'destino - razon social');
+      const cDestinoLoc = col('destino - localidad');
+      const cObs = col('observaciones');
+
+      const candidatas: any[] = [];
+      for (let i = headerRowIdx + 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row) continue;
+        const documento = cDocumento >= 0 ? row[cDocumento] : null;
+        const patenteRaw = cPatente >= 0 ? row[cPatente] : null;
+        const fecha = excelDateToStr(cFechaSalida >= 0 ? row[cFechaSalida] : null) || excelDateToStr(cFechaGen >= 0 ? row[cFechaGen] : null);
+        if (!documento && !patenteRaw && !fecha) continue; // fila vacía
+
+        const vehiculoId = patenteRaw ? vehicles.find(v => normPatente(v.patente) === normPatente(String(patenteRaw)))?.id : null;
+        const choferNombre = cChofer >= 0 ? row[cChofer] : null;
+        const choferId = choferNombre ? drivers.find(d => namesMatch(d.nombre, String(choferNombre)))?.id : null;
+        const ayudante = cAyudante >= 0 ? row[cAyudante] : null;
+        const cliente = cCliente >= 0 ? row[cCliente] : null;
+        const origen = (cOrigenRs >= 0 && row[cOrigenRs]) || (cOrigenLoc >= 0 ? row[cOrigenLoc] : null);
+        const destino = (cDestinoRs >= 0 && row[cDestinoRs]) || (cDestinoLoc >= 0 ? row[cDestinoLoc] : null);
+        const obs = cObs >= 0 ? row[cObs] : null;
+
+        const notasParts = [];
+        if (documento) notasParts.push(`HR ${documento}`);
+        if (cliente) notasParts.push(`Cliente: ${cliente}`);
+        if (ayudante) notasParts.push(`Ayudante: ${ayudante}`);
+        if (obs) notasParts.push(String(obs));
+
+        candidatas.push({
+          fecha: fecha || new Date().toISOString().slice(0, 10),
+          vehicle_id: vehiculoId || null,
+          driver_id: choferId || null,
+          origen: origen ? String(origen) : '',
+          destino: destino ? String(destino) : '',
+          km: cKm >= 0 ? toNumber(row[cKm]) : null,
+          costo_estimado: cVenta >= 0 ? toNumber(row[cVenta]) : null,
+          notas: notasParts.join(' · '),
+        });
+      }
+
+      if (candidatas.length === 0) {
+        showToast('No encontré filas de viajes para importar en ese archivo.', 'error');
+        setImporting(false);
+        return;
+      }
+
+      const sinVehiculo = candidatas.filter(c => !c.vehicle_id).length;
+      const sinChofer = candidatas.filter(c => !c.driver_id).length;
+      const confirmMsg = `Encontré ${candidatas.length} viajes para importar.` +
+        (sinVehiculo ? `\n${sinVehiculo} sin vehículo identificado (patente no coincide con ninguna cargada en Flota).` : '') +
+        (sinChofer ? `\n${sinChofer} sin chofer identificado.` : '') +
+        `\n\n¿Confirmás la importación?`;
+      if (!confirm(confirmMsg)) { setImporting(false); return; }
+
+      const supabase = supabaseBrowser();
+      const { data: { user } } = await supabase.auth.getUser();
+      const batchSize = 200;
+      let importados = 0;
+      for (let i = 0; i < candidatas.length; i += batchSize) {
+        const batch = candidatas.slice(i, i + batchSize).map(c => ({ owner: user!.id, ...c }));
+        const { error } = await supabase.from('trips').insert(batch);
+        if (error) { showToast(`Se importaron ${importados} viajes antes de un error. Probá de nuevo con el resto.`, 'error'); setImporting(false); load(); return; }
+        importados += batch.length;
+      }
+      showToast(`${importados} viajes importados`, 'success');
+      load();
+    } catch (e) {
+      showToast('No se pudo leer el archivo. Verificá que sea un Excel válido.', 'error');
+    }
+    setImporting(false);
+  }
+
   const form = editing || prefill;
 
   return (
@@ -126,6 +274,11 @@ export default function ViajesPage() {
       <div id="topbar">
         <div><h1>Viajes</h1><div className="sub">{trips.length} viaje{trips.length === 1 ? '' : 's'} registrado{trips.length === 1 ? '' : 's'}</div></div>
         <div className="topbar-actions">
+          <input ref={importRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportViajes(f); e.target.value = ''; }} />
+          <button className="btn btn-secondary" onClick={() => importRef.current?.click()} disabled={importing}>
+            {importing ? 'Importando...' : 'Importar Excel de viajes'}
+          </button>
           <button className="btn btn-secondary" onClick={() => setScanOpen(true)}>Escanear hoja de ruta</button>
           <button className="btn btn-primary" onClick={() => openForm(null, null)}>+ Cargar viaje</button>
         </div>
