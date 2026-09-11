@@ -13,6 +13,7 @@ export default function VehicleDetailPage({ params }: { params: { id: string } }
   const router = useRouter();
   const showToast = useToast();
   const [v, setV] = useState<Vehicle | null>(null);
+  const [tiposUnidad, setTiposUnidad] = useState<string[]>([]);
   const [docs, setDocs] = useState<VehicleDoc[]>([]);
   const [pagos, setPagos] = useState<VehiclePayment[]>([]);
   const [cubiertas, setCubiertas] = useState<Cubierta[]>([]);
@@ -26,15 +27,17 @@ export default function VehicleDetailPage({ params }: { params: { id: string } }
 
   async function loadAll() {
     const supabase = supabaseBrowser();
-    const [vv, dd, pp, cc, mm] = await Promise.all([
+    const [vv, dd, pp, cc, mm, tf] = await Promise.all([
       supabase.from('vehicles').select('*').eq('id', id).single(),
       supabase.from('vehicle_docs').select('*').eq('vehicle_id', id),
       supabase.from('vehicle_payments').select('*').eq('vehicle_id', id).order('fecha', { ascending: false }),
       supabase.from('vehicle_cubiertas').select('*').eq('vehicle_id', id).order('fecha', { ascending: false }),
       supabase.from('vehicle_mantenimientos').select('*').eq('vehicle_id', id).order('fecha', { ascending: false }),
+      supabase.from('tarifas').select('tipo_unidad'),
     ]);
     setV(vv.data); setDocs(dd.data || []); setPagos(pp.data || []);
     setCubiertas(cc.data || []); setMantenimientos(mm.data || []);
+    setTiposUnidad(Array.from(new Set((tf.data || []).map((t: any) => t.tipo_unidad))));
   }
   useEffect(() => { loadAll(); }, [id]);
 
@@ -192,7 +195,10 @@ export default function VehicleDetailPage({ params }: { params: { id: string } }
               <div className="field"><label>Año</label><input name="anio" type="number" defaultValue={v.anio || ''} /></div>
               <div className="field"><label>Kilometraje actual</label><input name="km" type="number" defaultValue={v.km || ''} /></div>
             </div>
-            <div className="field"><label>Tipo de unidad (para tarifas)</label><input name="tipo_unidad" defaultValue={v.tipo_unidad || ''} placeholder="Ej: Liviano 4500 kg." /></div>
+            <div className="field"><label>Tipo de unidad (para tarifas)</label>
+              <input name="tipo_unidad" defaultValue={v.tipo_unidad || ''} placeholder="Ej: Liviano 4500 kg." list="tipos-unidad-detalle" />
+              <datalist id="tipos-unidad-detalle">{tiposUnidad.map(t => <option key={t} value={t} />)}</datalist>
+            </div>
           </div>
           <div className="modal-foot">
             <button type="button" className="btn btn-danger-outline" onClick={deleteVehicle}>Eliminar</button>
